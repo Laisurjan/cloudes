@@ -2500,11 +2500,10 @@ function showImportModal() {
 }
 
 function downloadImportTemplate() {
-  const typeOptions = ['問答', '文字雲', '投票', '評分量表', '排序題'];
-  const yesNoOptions = ['是', '否'];
-
+  // 範本資料：第2列是說明，其他是範例
   const templateData = [
     ['題目內容', '類型', '選項/項目', '多選', '需填班級', '需填座號', '需填姓名'],
+    ['【說明】請在此列以下輸入題目', '問答/文字雲/投票/評分量表/排序題', '多個選項用逗號分隔', '是/否', '是/否', '是/否', '是/否'],
     ['今天的天氣如何？', '問答', '', '否', '否', '否', '否'],
     ['你最喜歡的顏色？', '文字雲', '', '否', '否', '否', '是'],
     ['你喜歡哪種水果？', '投票', '蘋果, 香蕉, 橘子', '是', '否', '否', '否'],
@@ -2517,42 +2516,13 @@ function downloadImportTemplate() {
 
   // 設定欄寬
   ws['!cols'] = [
-    { wch: 30 }, // 題目內容
-    { wch: 12 }, // 類型
-    { wch: 25 }, // 選項
-    { wch: 6 },  // 多選
+    { wch: 35 }, // 題目內容
+    { wch: 35 }, // 類型 (顯示說明用)
+    { wch: 28 }, // 選項
+    { wch: 8 },  // 多選
     { wch: 10 }, // 需填班級
     { wch: 10 }, // 需填座號
     { wch: 10 }  // 需填姓名
-  ];
-
-  // 建立下拉選單資料 (隱藏工作表)
-  const optionsSheet = XLSX.utils.aoa_to_sheet([
-    typeOptions,
-    yesNoOptions
-  ]);
-  XLSX.utils.book_append_sheet(wb, optionsSheet, '_Options');
-
-  // 設定資料驗證 (下拉選單) - 預設 100 列
-  ws['!dataValidations'] = [
-    {
-      sqref: 'B2:B100',  // 類型欄 (第2列到第100列)
-      type: 'list',
-      formula1: '"問答,文字雲,投票,評分量表,排序題"',
-      showDropDown: false,
-      showErrorMessage: true,
-      errorTitle: '輸入錯誤',
-      error: '請從下拉選單選擇類型'
-    },
-    {
-      sqref: 'D2:G100',  // 多選、需填班級、需填座號、需填姓名
-      type: 'list',
-      formula1: '"是,否"',
-      showDropDown: false,
-      showErrorMessage: true,
-      errorTitle: '輸入錯誤',
-      error: '請選擇「是」或「否」'
-    }
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, '題目範本');
@@ -2582,9 +2552,13 @@ function handleImportFile(event) {
         return;
       }
 
-      // 解析資料
+      // 解析資料 (跳過標題列和說明列)
       const headers = json[0];
-      const rows = json.slice(1).filter(row => row[0]); // 過濾空行
+      const rows = json.slice(1).filter(row => {
+        const firstCell = String(row[0] || '').trim();
+        // 過濾空行和說明列
+        return firstCell && !firstCell.startsWith('【說明】') && !firstCell.startsWith('---');
+      });
 
       importData = rows.map(row => {
         const typeMap = { '問答': 'qa', '文字雲': 'cloud', '投票': 'poll', '評分量表': 'scale', '排序題': 'rank' };
