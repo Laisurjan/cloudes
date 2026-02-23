@@ -2535,6 +2535,9 @@ function showImportModal() {
 }
 
 function downloadImportTemplate() {
+  const typeOptions = ['問答', '文字雲', '投票', '評分量表', '排序題'];
+  const yesNoOptions = ['是', '否'];
+
   const templateData = [
     ['題目內容', '類型', '選項/項目', '多選', '需填班級', '需填座號', '需填姓名'],
     ['今天的天氣如何？', '問答', '', '否', '否', '否', '否'],
@@ -2556,6 +2559,35 @@ function downloadImportTemplate() {
     { wch: 10 }, // 需填班級
     { wch: 10 }, // 需填座號
     { wch: 10 }  // 需填姓名
+  ];
+
+  // 建立下拉選單資料 (隱藏工作表)
+  const optionsSheet = XLSX.utils.aoa_to_sheet([
+    typeOptions,
+    yesNoOptions
+  ]);
+  XLSX.utils.book_append_sheet(wb, optionsSheet, '_Options');
+
+  // 設定資料驗證 (下拉選單) - 預設 100 列
+  ws['!dataValidations'] = [
+    {
+      sqref: 'B2:B100',  // 類型欄 (第2列到第100列)
+      type: 'list',
+      formula1: '"問答,文字雲,投票,評分量表,排序題"',
+      showDropDown: false,
+      showErrorMessage: true,
+      errorTitle: '輸入錯誤',
+      error: '請從下拉選單選擇類型'
+    },
+    {
+      sqref: 'D2:G100',  // 多選、需填班級、需填座號、需填姓名
+      type: 'list',
+      formula1: '"是,否"',
+      showDropDown: false,
+      showErrorMessage: true,
+      errorTitle: '輸入錯誤',
+      error: '請選擇「是」或「否」'
+    }
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, '題目範本');
