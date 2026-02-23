@@ -1023,6 +1023,125 @@ async function deleteQuestion(qid) {
   }
 }
 
+/* 編輯題目 */
+async function editQuestion(qid) {
+  if (!isAdmin) { alert('請先登入管理員帳號'); return; }
+
+  try {
+    // 取得題目資料
+    const qDoc = await db.collection('questionSets').doc(currentSetId)
+      .collection('questions').doc(qid).get();
+
+    if (!qDoc.exists) {
+      alert('題目不存在');
+      return;
+    }
+
+    const q = qDoc.data();
+    const modal = $('#modal-overlay');
+    const content = $('#modal-content');
+
+    content.innerHTML = `
+      <h3 style="margin-top:0;">編輯題目</h3>
+      <input class="input mb-2" id="edit-q-prompt" placeholder="題目內容" value="${(q.prompt || '').replace(/"/g, '&quot;')}">
+
+      <div class="row mb-2" style="flex-wrap:wrap;">
+        <label><input type="radio" name="edit-q-type" value="qa" ${q.type === 'qa' ? 'checked' : ''}> 問答（可按讚）</label>
+        <label><input type="radio" name="edit-q-type" value="cloud" ${q.type === 'cloud' ? 'checked' : ''}> 文字雲</label>
+        <label><input type="radio" name="edit-q-type" value="poll" ${q.type === 'poll' ? 'checked' : ''}> 投票</label>
+        <label><input type="radio" name="edit-q-type" value="scale" ${q.type === 'scale' ? 'checked' : ''}> 評分量表</label>
+        <label><input type="radio" name="edit-q-type" value="rank" ${q.type === 'rank' ? 'checked' : ''}> 排序題</label>
+      </div>
+
+      <div id="edit-poll-options-area" class="${q.type === 'poll' ? '' : 'hidden'}">
+        <textarea class="input mb-2" id="edit-q-options" rows="3" placeholder="投票選項（每行一個）">${(q.options || []).join('\n')}</textarea>
+        <div class="row mb-2">
+          <label><input type="checkbox" id="edit-q-multi" ${q.multiSelect ? 'checked' : ''}> 允許多選</label>
+        </div>
+      </div>
+
+      <div id="edit-rank-options-area" class="${q.type === 'rank' ? '' : 'hidden'}">
+        <textarea class="input mb-2" id="edit-q-rank-items" rows="3" placeholder="排序項目（每行一個）">${(q.rankItems || []).join('\n')}</textarea>
+      </div>
+
+      <div class="card mb-2" style="padding:12px;background:var(--bg);">
+        <strong style="font-size:14px;">填答者資料設定</strong>
+        <div class="row mt-2">
+          <label><input type="checkbox" id="edit-req-name" ${q.requireInfo?.name ? 'checked' : ''}> 要求填寫姓名</label>
+          <label><input type="checkbox" id="edit-req-seat" ${q.requireInfo?.seat ? 'checked' : ''}> 要求填寫座號</label>
+          <label><input type="checkbox" id="edit-req-class" ${q.requireInfo?.class ? 'checked' : ''}> 要求填寫班級</label>
+        </div>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveQuestion('${qid}')">儲存變更</button>
+      </div>
+    `;
+
+    // Toggle options areas based on type
+    content.querySelectorAll('input[name="edit-q-type"]').forEach(r => {
+      r.onchange = () => {
+        const val = document.querySelector('input[name="edit-q-type"]:checked').value;
+        $('#edit-poll-options-area').classList.toggle('hidden', val !== 'poll');
+        $('#edit-rank-options-area').classList.toggle('hidden', val !== 'rank');
+      };
+    });
+
+    modal.classList.remove('hidden');
+
+  } catch (e) {
+    alert('載入題目失敗：' + e.message);
+    console.error(e);
+  }
+}
+
+async function saveQuestion(qid) {
+  const prompt = $('#edit-q-prompt').value.trim();
+  if (!prompt) { alert('請輸入題目內容'); return; }
+
+  const type = document.querySelector('input[name="edit-q-type"]:checked').value;
+  const options = type === 'poll' ? splitInput($('#edit-q-options').value) : [];
+  const rankItems = type === 'rank' ? splitInput($('#edit-q-rank-items').value) : [];
+  const multiSelect = type === 'poll' ? $('#edit-q-multi').checked : false;
+
+  const requireInfo = {
+    name: $('#edit-req-name').checked,
+    seat: $('#edit-req-seat').checked,
+    class: $('#edit-req-class').checked
+  };
+
+  if (type === 'poll' && options.length < 2) {
+    alert('投票至少需要兩個選項');
+    return;
+  }
+
+  if (type === 'rank' && rankItems.length < 2) {
+    alert('排序題至少需要兩個項目');
+    return;
+  }
+
+  try {
+    await db.collection('questionSets').doc(currentSetId)
+      .collection('questions').doc(qid)
+      .update({
+        prompt,
+        type,
+        options,
+        rankItems,
+        multiSelect,
+        requireInfo,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+    closeModal();
+    toast('題目已更新！');
+  } catch (e) {
+    alert('儲存失敗：' + e.message);
+    console.error(e);
+  }
+}
+
 /* ========== Display View ========== */
 let displaySetId = null;
 let displayRoomId = null;
