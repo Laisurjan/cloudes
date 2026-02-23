@@ -287,6 +287,109 @@ a { color: var(--primary); }
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* Upvote Box */
+.upvote-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  min-width: 50px;
+  transition: all 0.15s;
+}
+.upvote-box:hover { border-color: var(--primary); background: var(--bg-card); }
+.upvote-icon { font-size: 18px; }
+.upvote-count { font-size: 14px; font-weight: 600; }
+
+/* Scale Result */
+.scale-result { text-align: center; padding: 20px; }
+.scale-avg { margin-bottom: 24px; }
+.scale-avg-num { font-size: 64px; font-weight: 700; color: var(--primary); }
+.scale-avg-label { display: block; color: var(--text-muted); margin-top: 4px; }
+.scale-bars { display: flex; justify-content: center; gap: 8px; height: 120px; align-items: flex-end; }
+.scale-bar-item { display: flex; flex-direction: column; align-items: center; width: 36px; }
+.scale-bar-fill { width: 100%; background: var(--primary); border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.3s; }
+.scale-bar-label { margin-top: 6px; font-weight: 600; font-size: 14px; }
+.scale-bar-count { font-size: 12px; color: var(--text-muted); }
+
+/* Rank Result */
+.rank-result { padding: 12px; }
+.rank-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 8px 0;
+}
+.rank-position {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.rank-item:nth-child(2) .rank-position { background: #f59e0b; }
+.rank-item:nth-child(3) .rank-position { background: #10b981; }
+.rank-item:nth-child(4) .rank-position { background: #6b7280; }
+.rank-name { flex: 1; font-weight: 500; }
+.rank-avg { color: var(--text-muted); font-size: 14px; }
+
+/* Rank Drag (Student) */
+.rank-drag-list { list-style: none; padding: 0; margin: 0; }
+.rank-drag-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 8px 0;
+  cursor: grab;
+  transition: all 0.15s;
+}
+.rank-drag-item:hover { border-color: var(--primary); }
+.rank-drag-item.dragging { opacity: 0.5; border-style: dashed; }
+.rank-drag-handle { color: var(--text-muted); font-size: 18px; }
+.rank-drag-num {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Scale Input (Student) */
+.scale-input { text-align: center; padding: 20px; }
+.scale-buttons { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+.scale-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.scale-btn:hover { border-color: var(--primary); background: var(--bg-card); }
+.scale-btn.selected { border-color: var(--primary); background: var(--primary); color: #fff; }
 </style>
 
 <!-- Firebase -->
@@ -692,15 +795,24 @@ async function loadSetDetail(setId) {
         if (req.seat) reqLabels.push('座號');
         if (req.name) reqLabels.push('姓名');
 
+        const typeLabels = {
+          qa: '問答',
+          cloud: '文字雲',
+          poll: '投票',
+          scale: '評分量表',
+          rank: '排序題'
+        };
+
         return `
         <div class="card">
           <div class="row" style="justify-content:space-between;">
             <div>
               <strong>${i + 1}. ${q.prompt || '未命名題目'}</strong>
               <div class="muted mt-2">
-                <span class="badge">${q.type === 'qa' ? '問答' : q.type === 'cloud' ? '文字雲' : '投票'}</span>
+                <span class="badge">${typeLabels[q.type] || q.type}</span>
                 ${q.type === 'poll' && q.options ? `選項：${q.options.join('、')}` : ''}
                 ${q.type === 'poll' && q.multiSelect ? '<span class="badge">多選</span>' : ''}
+                ${q.type === 'rank' && q.rankItems ? `項目：${q.rankItems.join('、')}` : ''}
                 ${reqLabels.length > 0 ? `<span class="badge">需填：${reqLabels.join('、')}</span>` : ''}
               </div>
             </div>
@@ -780,10 +892,12 @@ function showAddQuestionModal() {
     <h3 style="margin-top:0;">新增題目</h3>
     <input class="input mb-2" id="new-q-prompt" placeholder="題目內容">
 
-    <div class="row mb-2">
-      <label><input type="radio" name="q-type" value="qa" checked> 問答蒐集</label>
+    <div class="row mb-2" style="flex-wrap:wrap;">
+      <label><input type="radio" name="q-type" value="qa" checked> 問答（可按讚）</label>
       <label><input type="radio" name="q-type" value="cloud"> 文字雲</label>
       <label><input type="radio" name="q-type" value="poll"> 投票</label>
+      <label><input type="radio" name="q-type" value="scale"> 評分量表</label>
+      <label><input type="radio" name="q-type" value="rank"> 排序題</label>
     </div>
 
     <div id="poll-options-area" class="hidden">
@@ -791,6 +905,10 @@ function showAddQuestionModal() {
       <div class="row mb-2">
         <label><input type="checkbox" id="new-q-multi"> 允許多選</label>
       </div>
+    </div>
+
+    <div id="rank-options-area" class="hidden">
+      <textarea class="input mb-2" id="new-q-rank-items" rows="3" placeholder="排序項目（每行一個，學生將依重要性排序）"></textarea>
     </div>
 
     <div class="card mb-2" style="padding:12px;background:var(--bg);">
@@ -808,10 +926,12 @@ function showAddQuestionModal() {
     </div>
   `;
 
-  // Toggle options textarea
+  // Toggle options areas based on type
   content.querySelectorAll('input[name="q-type"]').forEach(r => {
     r.onchange = () => {
-      $('#poll-options-area').classList.toggle('hidden', r.value !== 'poll');
+      const val = document.querySelector('input[name="q-type"]:checked').value;
+      $('#poll-options-area').classList.toggle('hidden', val !== 'poll');
+      $('#rank-options-area').classList.toggle('hidden', val !== 'rank');
     };
   });
 
@@ -824,6 +944,7 @@ async function createQuestion() {
 
   const type = document.querySelector('input[name="q-type"]:checked').value;
   const options = type === 'poll' ? splitInput($('#new-q-options').value) : [];
+  const rankItems = type === 'rank' ? splitInput($('#new-q-rank-items').value) : [];
   const multiSelect = type === 'poll' ? $('#new-q-multi').checked : false;
 
   // 填答者資料設定
@@ -838,6 +959,11 @@ async function createQuestion() {
     return;
   }
 
+  if (type === 'rank' && rankItems.length < 2) {
+    alert('排序題至少需要兩個項目');
+    return;
+  }
+
   try {
     const questionsRef = db.collection('questionSets').doc(currentSetId).collection('questions');
     const snap = await questionsRef.get();
@@ -847,6 +973,7 @@ async function createQuestion() {
       prompt,
       type,
       options,
+      rankItems,
       multiSelect,
       requireInfo,
       order,
@@ -954,11 +1081,12 @@ function loadDisplayQuestions() {
       const questions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       $('#q-count').textContent = `${questions.length} 題`;
 
+      const typeLabels = { qa: '問答', cloud: '文字雲', poll: '投票', scale: '評分', rank: '排序' };
       list.innerHTML = questions.map(q => `
         <div class="q-item ${displayCurrentQId === q.id ? 'active' : ''}"
              data-id="${q.id}" onclick="selectDisplayQuestion('${q.id}')">
           ${q.prompt || '未命名題目'}
-          <span class="badge">${q.type === 'qa' ? '問答' : q.type === 'cloud' ? '文字雲' : '投票'}</span>
+          <span class="badge">${typeLabels[q.type] || q.type}</span>
         </div>
       `).join('');
 
@@ -995,6 +1123,10 @@ async function selectDisplayQuestion(qid) {
     displayResponsesUnsub = renderCloud(qid, content);
   } else if (q.type === 'poll') {
     displayResponsesUnsub = renderPoll(qid, q.options || [], content);
+  } else if (q.type === 'scale') {
+    displayResponsesUnsub = renderScale(qid, content);
+  } else if (q.type === 'rank') {
+    displayResponsesUnsub = renderRank(qid, q.rankItems || [], content);
   }
 
   // Update room current question
@@ -1007,30 +1139,37 @@ function renderQA(qid, container) {
   return db.collection('questionSets').doc(displaySetId)
     .collection('questions').doc(qid)
     .collection('responses')
-    .orderBy('ts', 'desc')
     .onSnapshot(snap => {
       if (snap.empty) {
         container.innerHTML = '<div class="muted text-center">尚無回覆</div>';
         return;
       }
 
-      container.innerHTML = snap.docs.map(d => {
-        const data = d.data();
+      // 按讚數排序（高到低），再按時間
+      const docs = snap.docs.map(d => ({ id: d.id, data: d.data() }));
+      docs.sort((a, b) => (b.data.upvotes || 0) - (a.data.upvotes || 0));
+
+      container.innerHTML = docs.map(({ id, data }) => {
         // 組合個人資料標籤
         const infoTags = [];
         if (data.class) infoTags.push(data.class);
         if (data.seat) infoTags.push(data.seat);
         if (data.name) infoTags.push(data.name);
         const infoStr = infoTags.length > 0 ? `<span class="badge" style="margin-right:8px;">${infoTags.join(' ')}</span>` : '';
+        const upvotes = data.upvotes || 0;
 
         return `
-          <div class="qa-card ${data.flagged ? 'flagged' : ''}">
+          <div class="qa-card ${data.flagged ? 'flagged' : ''}" style="align-items:flex-start;">
+            <div class="upvote-box" onclick="toggleUpvote('${qid}', '${id}')">
+              <span class="upvote-icon">👍</span>
+              <span class="upvote-count">${upvotes}</span>
+            </div>
             <div class="flex-1">
               ${infoStr}${data.text || ''}
             </div>
             <div class="row admin-only">
-              <button class="btn btn-sm" onclick="toggleResponseHidden('${qid}', '${d.id}', ${!data.hidden})">${data.hidden ? '顯示' : '隱藏'}</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteResponse('${qid}', '${d.id}')">刪除</button>
+              <button class="btn btn-sm" onclick="toggleResponseHidden('${qid}', '${id}', ${!data.hidden})">${data.hidden ? '顯示' : '隱藏'}</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteResponse('${qid}', '${id}')">刪除</button>
             </div>
           </div>
         `;
@@ -1109,6 +1248,129 @@ function renderPoll(qid, options, container) {
         `;
       }).join('');
     });
+}
+
+/* 評分量表顯示 */
+function renderScale(qid, container) {
+  return db.collection('questionSets').doc(displaySetId)
+    .collection('questions').doc(qid)
+    .collection('responses')
+    .onSnapshot(snap => {
+      if (snap.empty) {
+        container.innerHTML = '<div class="muted text-center">尚無評分</div>';
+        return;
+      }
+
+      const scores = [];
+      snap.forEach(d => {
+        const s = d.data().score;
+        if (typeof s === 'number' && s >= 1 && s <= 10) scores.push(s);
+      });
+
+      if (scores.length === 0) {
+        container.innerHTML = '<div class="muted text-center">尚無有效評分</div>';
+        return;
+      }
+
+      const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
+      const distribution = Array(10).fill(0);
+      scores.forEach(s => distribution[s - 1]++);
+      const maxCount = Math.max(...distribution) || 1;
+
+      container.innerHTML = `
+        <div class="scale-result">
+          <div class="scale-avg">
+            <span class="scale-avg-num">${avg}</span>
+            <span class="scale-avg-label">平均分 (${scores.length} 人)</span>
+          </div>
+          <div class="scale-bars">
+            ${distribution.map((count, i) => `
+              <div class="scale-bar-item">
+                <div class="scale-bar-fill" style="height:${(count / maxCount) * 100}%"></div>
+                <div class="scale-bar-label">${i + 1}</div>
+                <div class="scale-bar-count">${count}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    });
+}
+
+/* 排序題顯示 */
+function renderRank(qid, rankItems, container) {
+  return db.collection('questionSets').doc(displaySetId)
+    .collection('questions').doc(qid)
+    .collection('responses')
+    .onSnapshot(snap => {
+      if (snap.empty) {
+        container.innerHTML = '<div class="muted text-center">尚無排序資料</div>';
+        return;
+      }
+
+      // 計算每個項目的平均排名
+      const rankSums = {};
+      const rankCounts = {};
+      rankItems.forEach(item => { rankSums[item] = 0; rankCounts[item] = 0; });
+
+      snap.forEach(d => {
+        const ranking = d.data().ranking;
+        if (Array.isArray(ranking)) {
+          ranking.forEach((item, idx) => {
+            if (rankSums[item] !== undefined) {
+              rankSums[item] += idx + 1; // 排名從 1 開始
+              rankCounts[item]++;
+            }
+          });
+        }
+      });
+
+      // 計算平均排名並排序
+      const results = rankItems.map(item => ({
+        item,
+        avgRank: rankCounts[item] > 0 ? rankSums[item] / rankCounts[item] : 999,
+        count: rankCounts[item]
+      })).sort((a, b) => a.avgRank - b.avgRank);
+
+      const totalResponses = snap.size;
+
+      container.innerHTML = `
+        <div class="rank-result">
+          <div class="muted mb-2">共 ${totalResponses} 人作答，依平均排名排序：</div>
+          ${results.map((r, i) => `
+            <div class="rank-item">
+              <span class="rank-position">${i + 1}</span>
+              <span class="rank-name">${r.item}</span>
+              <span class="rank-avg">平均 ${r.avgRank.toFixed(1)} 名</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    });
+}
+
+/* 按讚切換 */
+async function toggleUpvote(qid, rid) {
+  const lockKey = `upvoted:${displayRoomId}:${qid}:${rid}`;
+  const hasUpvoted = localStorage.getItem(lockKey);
+
+  try {
+    const ref = db.collection('questionSets').doc(displaySetId)
+      .collection('questions').doc(qid)
+      .collection('responses').doc(rid);
+
+    if (hasUpvoted) {
+      // 取消讚
+      await ref.update({ upvotes: firebase.firestore.FieldValue.increment(-1) });
+      localStorage.removeItem(lockKey);
+    } else {
+      // 按讚
+      await ref.update({ upvotes: firebase.firestore.FieldValue.increment(1) });
+      localStorage.setItem(lockKey, '1');
+    }
+  } catch (e) {
+    console.error('Upvote error:', e);
+  }
 }
 
 function updateDisplayStatus(isOpen) {
@@ -1297,6 +1559,56 @@ function renderJoinInput(qid, q) {
         </div>
       `;
     }
+  } else if (q.type === 'scale') {
+    // 評分量表
+    const lockKey = `scaled:${joinRoomId}:${qid}`;
+    const scaled = localStorage.getItem(lockKey);
+
+    if (scaled) {
+      area.innerHTML = `<div class="badge badge-success">已評分：${scaled} 分</div>`;
+      return;
+    }
+
+    area.innerHTML = `
+      ${infoFields}
+      <div class="scale-input">
+        <div class="muted mb-2">請選擇 1-10 分</div>
+        <div class="scale-buttons" id="scale-btns">
+          ${[1,2,3,4,5,6,7,8,9,10].map(n => `
+            <button class="scale-btn" data-score="${n}" onclick="selectScale(${n})">${n}</button>
+          `).join('')}
+        </div>
+        <button class="btn btn-primary mt-4" onclick="submitScale('${qid}')">送出評分</button>
+      </div>
+    `;
+  } else if (q.type === 'rank') {
+    // 排序題
+    const lockKey = `ranked:${joinRoomId}:${qid}`;
+    const ranked = localStorage.getItem(lockKey);
+
+    if (ranked) {
+      area.innerHTML = `<div class="badge badge-success">已完成排序</div>`;
+      return;
+    }
+
+    const items = q.rankItems || [];
+    area.innerHTML = `
+      ${infoFields}
+      <div class="muted mb-2">拖曳排序（最重要的放最上面）</div>
+      <ul class="rank-drag-list" id="rank-list">
+        ${items.map((item, i) => `
+          <li class="rank-drag-item" draggable="true" data-item="${item}">
+            <span class="rank-drag-handle">☰</span>
+            <span class="rank-drag-num">${i + 1}</span>
+            <span class="flex-1">${item}</span>
+          </li>
+        `).join('')}
+      </ul>
+      <button class="btn btn-primary mt-2" onclick="submitRank('${qid}')">送出排序</button>
+    `;
+
+    // 啟用拖曳排序
+    setTimeout(() => initRankDrag(), 50);
   }
 
   // 儲存題目設定供後續使用
@@ -1399,6 +1711,117 @@ async function submitMultiVote(qid) {
     $('#join-input-area').innerHTML = `<div class="badge badge-success">已投票：${checked.join(', ')}</div>`;
   } catch (e) {
     alert('投票失敗：' + e.message);
+  }
+}
+
+/* ========== 評分量表 (Scale) ========== */
+let selectedScore = null;
+
+function selectScale(n) {
+  selectedScore = n;
+  $$('#scale-btns .scale-btn').forEach(btn => {
+    btn.classList.toggle('selected', parseInt(btn.dataset.score) === n);
+  });
+}
+
+async function submitScale(qid) {
+  if (!selectedScore) {
+    alert('請選擇分數');
+    return;
+  }
+
+  const info = collectPersonalInfo();
+  if (info === null) return;
+
+  const lockKey = `scaled:${joinRoomId}:${qid}`;
+
+  try {
+    await db.collection('questionSets').doc(joinSetId)
+      .collection('questions').doc(qid)
+      .collection('responses').add(withTTL({
+        score: selectedScore,
+        ...info,
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+      }));
+
+    localStorage.setItem(lockKey, selectedScore);
+    $('#join-input-area').innerHTML = `<div class="badge badge-success">已評分：${selectedScore} 分</div>`;
+    selectedScore = null;
+  } catch (e) {
+    alert('評分失敗：' + e.message);
+  }
+}
+
+/* ========== 排序題 (Rank) ========== */
+function initRankDrag() {
+  const list = document.getElementById('rank-list');
+  if (!list) return;
+
+  let dragItem = null;
+
+  list.querySelectorAll('.rank-drag-item').forEach(item => {
+    item.addEventListener('dragstart', () => {
+      dragItem = item;
+      item.classList.add('dragging');
+    });
+
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      dragItem = null;
+      updateRankNumbers();
+    });
+
+    item.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!dragItem || dragItem === item) return;
+
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+
+      if (e.clientY < midY) {
+        list.insertBefore(dragItem, item);
+      } else {
+        list.insertBefore(dragItem, item.nextSibling);
+      }
+    });
+  });
+}
+
+function updateRankNumbers() {
+  const items = document.querySelectorAll('#rank-list .rank-drag-item');
+  items.forEach((item, idx) => {
+    const numEl = item.querySelector('.rank-drag-num');
+    if (numEl) numEl.textContent = idx + 1;
+  });
+}
+
+async function submitRank(qid) {
+  const items = document.querySelectorAll('#rank-list .rank-drag-item');
+  const ranking = [...items].map(item => item.dataset.item);
+
+  if (ranking.length === 0) {
+    alert('排序資料有誤');
+    return;
+  }
+
+  const info = collectPersonalInfo();
+  if (info === null) return;
+
+  const lockKey = `ranked:${joinRoomId}:${qid}`;
+
+  try {
+    await db.collection('questionSets').doc(joinSetId)
+      .collection('questions').doc(qid)
+      .collection('responses').add(withTTL({
+        ranking,
+        ...info,
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+      }));
+
+    localStorage.setItem(lockKey, '1');
+    $('#join-input-area').innerHTML = `<div class="badge badge-success">已完成排序</div>`;
+  } catch (e) {
+    alert('送出失敗：' + e.message);
   }
 }
 
