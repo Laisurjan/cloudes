@@ -685,7 +685,14 @@ async function loadSetDetail(setId) {
       }
 
       noQ.classList.add('hidden');
-      list.innerHTML = questions.map((q, i) => `
+      list.innerHTML = questions.map((q, i) => {
+        const req = q.requireInfo || {};
+        const reqLabels = [];
+        if (req.class) reqLabels.push('班級');
+        if (req.seat) reqLabels.push('座號');
+        if (req.name) reqLabels.push('姓名');
+
+        return `
         <div class="card">
           <div class="row" style="justify-content:space-between;">
             <div>
@@ -693,6 +700,8 @@ async function loadSetDetail(setId) {
               <div class="muted mt-2">
                 <span class="badge">${q.type === 'qa' ? '問答' : q.type === 'cloud' ? '文字雲' : '投票'}</span>
                 ${q.type === 'poll' && q.options ? `選項：${q.options.join('、')}` : ''}
+                ${q.type === 'poll' && q.multiSelect ? '<span class="badge">多選</span>' : ''}
+                ${reqLabels.length > 0 ? `<span class="badge">需填：${reqLabels.join('、')}</span>` : ''}
               </div>
             </div>
             <div class="row admin-only">
@@ -701,7 +710,7 @@ async function loadSetDetail(setId) {
             </div>
           </div>
         </div>
-      `).join('');
+      `}).join('');
 
       updateAdminVisibility();
     });
@@ -770,12 +779,29 @@ function showAddQuestionModal() {
   content.innerHTML = `
     <h3 style="margin-top:0;">新增題目</h3>
     <input class="input mb-2" id="new-q-prompt" placeholder="題目內容">
+
     <div class="row mb-2">
       <label><input type="radio" name="q-type" value="qa" checked> 問答蒐集</label>
       <label><input type="radio" name="q-type" value="cloud"> 文字雲</label>
       <label><input type="radio" name="q-type" value="poll"> 投票</label>
     </div>
-    <textarea class="input mb-2 hidden" id="new-q-options" rows="3" placeholder="投票選項（每行一個）"></textarea>
+
+    <div id="poll-options-area" class="hidden">
+      <textarea class="input mb-2" id="new-q-options" rows="3" placeholder="投票選項（每行一個）"></textarea>
+      <div class="row mb-2">
+        <label><input type="checkbox" id="new-q-multi"> 允許多選</label>
+      </div>
+    </div>
+
+    <div class="card mb-2" style="padding:12px;background:var(--bg);">
+      <strong style="font-size:14px;">填答者資料設定</strong>
+      <div class="row mt-2">
+        <label><input type="checkbox" id="req-name"> 要求填寫姓名</label>
+        <label><input type="checkbox" id="req-seat"> 要求填寫座號</label>
+        <label><input type="checkbox" id="req-class"> 要求填寫班級</label>
+      </div>
+    </div>
+
     <div class="row" style="justify-content:flex-end;">
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn btn-primary" onclick="createQuestion()">建立</button>
@@ -785,7 +811,7 @@ function showAddQuestionModal() {
   // Toggle options textarea
   content.querySelectorAll('input[name="q-type"]').forEach(r => {
     r.onchange = () => {
-      $('#new-q-options').classList.toggle('hidden', r.value !== 'poll');
+      $('#poll-options-area').classList.toggle('hidden', r.value !== 'poll');
     };
   });
 
@@ -798,6 +824,14 @@ async function createQuestion() {
 
   const type = document.querySelector('input[name="q-type"]:checked').value;
   const options = type === 'poll' ? splitInput($('#new-q-options').value) : [];
+  const multiSelect = type === 'poll' ? $('#new-q-multi').checked : false;
+
+  // 填答者資料設定
+  const requireInfo = {
+    name: $('#req-name').checked,
+    seat: $('#req-seat').checked,
+    class: $('#req-class').checked
+  };
 
   if (type === 'poll' && options.length < 2) {
     alert('投票至少需要兩個選項');
@@ -813,6 +847,8 @@ async function createQuestion() {
       prompt,
       type,
       options,
+      multiSelect,
+      requireInfo,
       order,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     }));
@@ -980,9 +1016,18 @@ function renderQA(qid, container) {
 
       container.innerHTML = snap.docs.map(d => {
         const data = d.data();
+        // 組合個人資料標籤
+        const infoTags = [];
+        if (data.class) infoTags.push(data.class);
+        if (data.seat) infoTags.push(data.seat);
+        if (data.name) infoTags.push(data.name);
+        const infoStr = infoTags.length > 0 ? `<span class="badge" style="margin-right:8px;">${infoTags.join(' ')}</span>` : '';
+
         return `
           <div class="qa-card ${data.flagged ? 'flagged' : ''}">
-            <div class="flex-1">${data.text || ''}</div>
+            <div class="flex-1">
+              ${infoStr}${data.text || ''}
+            </div>
             <div class="row admin-only">
               <button class="btn btn-sm" onclick="toggleResponseHidden('${qid}', '${d.id}', ${!data.hidden})">${data.hidden ? '顯示' : '隱藏'}</button>
               <button class="btn btn-sm btn-danger" onclick="deleteResponse('${qid}', '${d.id}')">刪除</button>
@@ -1035,9 +1080,18 @@ function renderPoll(qid, options, container) {
       options.forEach(o => counts[o] = 0);
 
       snap.forEach(d => {
-        const opt = d.data().option;
-        if (opt && counts[opt] !== undefined) {
-          counts[opt]++;
+        const data = d.data();
+        // 單選
+        if (data.option && counts[data.option] !== undefined) {
+          counts[data.option]++;
+        }
+        // 多選
+        if (Array.isArray(data.options)) {
+          data.options.forEach(opt => {
+            if (counts[opt] !== undefined) {
+              counts[opt]++;
+            }
+          });
         }
       });
 
@@ -1184,9 +1238,26 @@ async function enterRoom() {
 function renderJoinInput(qid, q) {
   const area = $('#join-input-area');
   const status = $('#join-status');
+  const req = q.requireInfo || {};
+
+  // 個人資料欄位
+  let infoFields = '';
+  if (req.name || req.seat || req.class) {
+    infoFields = `
+      <div class="card mb-2" style="padding:12px;background:var(--bg);">
+        <strong style="font-size:13px;">請填寫個人資料</strong>
+        <div class="row mt-2" style="gap:8px;">
+          ${req.class ? '<input class="input" id="join-class" placeholder="班級" style="flex:1;min-width:80px;">' : ''}
+          ${req.seat ? '<input class="input" id="join-seat" placeholder="座號" style="flex:1;min-width:80px;">' : ''}
+          ${req.name ? '<input class="input" id="join-name" placeholder="姓名" style="flex:1;min-width:80px;">' : ''}
+        </div>
+      </div>
+    `;
+  }
 
   if (q.type === 'qa' || q.type === 'cloud') {
     area.innerHTML = `
+      ${infoFields}
       <textarea class="input" id="join-text" rows="3" placeholder="${q.type === 'cloud' ? '輸入詞語（可用逗號分隔多個）' : '輸入你的回答'}"></textarea>
       <button class="btn btn-primary mt-2" onclick="submitText('${qid}')">送出</button>
     `;
@@ -1199,25 +1270,77 @@ function renderJoinInput(qid, q) {
       return;
     }
 
-    area.innerHTML = `
-      <div class="row" style="flex-wrap:wrap;gap:10px;">
-        ${(q.options || []).map(opt => `
-          <button class="btn" onclick="submitVote('${qid}', '${opt}')">${opt}</button>
-        `).join('')}
-      </div>
-    `;
+    const isMulti = q.multiSelect === true;
+
+    if (isMulti) {
+      // 多選模式：用 checkbox
+      area.innerHTML = `
+        ${infoFields}
+        <div style="margin-bottom:12px;">
+          ${(q.options || []).map(opt => `
+            <label class="row" style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin:6px 0;cursor:pointer;">
+              <input type="checkbox" class="poll-check" value="${opt}">
+              <span style="margin-left:8px;">${opt}</span>
+            </label>
+          `).join('')}
+        </div>
+        <button class="btn btn-primary" onclick="submitMultiVote('${qid}')">確認送出</button>
+      `;
+    } else {
+      // 單選模式：按鈕
+      area.innerHTML = `
+        ${infoFields}
+        <div class="row" style="flex-wrap:wrap;gap:10px;">
+          ${(q.options || []).map(opt => `
+            <button class="btn" onclick="submitVote('${qid}', '${opt}')">${opt}</button>
+          `).join('')}
+        </div>
+      `;
+    }
   }
+
+  // 儲存題目設定供後續使用
+  window.currentJoinQuestion = q;
+}
+
+// 收集個人資料
+function collectPersonalInfo() {
+  const q = window.currentJoinQuestion || {};
+  const req = q.requireInfo || {};
+  const info = {};
+
+  if (req.name) {
+    const name = ($('#join-name')?.value || '').trim();
+    if (!name) { alert('請填寫姓名'); return null; }
+    info.name = name;
+  }
+  if (req.seat) {
+    const seat = ($('#join-seat')?.value || '').trim();
+    if (!seat) { alert('請填寫座號'); return null; }
+    info.seat = seat;
+  }
+  if (req.class) {
+    const cls = ($('#join-class')?.value || '').trim();
+    if (!cls) { alert('請填寫班級'); return null; }
+    info.class = cls;
+  }
+
+  return info;
 }
 
 async function submitText(qid) {
   const text = $('#join-text').value.trim();
   if (!text) { alert('請輸入內容'); return; }
 
+  const info = collectPersonalInfo();
+  if (info === null) return;
+
   try {
     await db.collection('questionSets').doc(joinSetId)
       .collection('questions').doc(qid)
       .collection('responses').add(withTTL({
         text,
+        ...info,
         ts: firebase.firestore.FieldValue.serverTimestamp()
       }));
 
@@ -1232,16 +1355,48 @@ async function submitText(qid) {
 async function submitVote(qid, option) {
   const lockKey = `voted:${joinRoomId}:${qid}`;
 
+  const info = collectPersonalInfo();
+  if (info === null) return;
+
   try {
     await db.collection('questionSets').doc(joinSetId)
       .collection('questions').doc(qid)
       .collection('responses').add(withTTL({
         option,
+        ...info,
         ts: firebase.firestore.FieldValue.serverTimestamp()
       }));
 
     localStorage.setItem(lockKey, option);
     $('#join-input-area').innerHTML = `<div class="badge badge-success">已投票：${option}</div>`;
+  } catch (e) {
+    alert('投票失敗：' + e.message);
+  }
+}
+
+async function submitMultiVote(qid) {
+  const lockKey = `voted:${joinRoomId}:${qid}`;
+  const checked = [...document.querySelectorAll('.poll-check:checked')].map(el => el.value);
+
+  if (checked.length === 0) {
+    alert('請至少選擇一個選項');
+    return;
+  }
+
+  const info = collectPersonalInfo();
+  if (info === null) return;
+
+  try {
+    await db.collection('questionSets').doc(joinSetId)
+      .collection('questions').doc(qid)
+      .collection('responses').add(withTTL({
+        options: checked,  // 多選用 options 陣列
+        ...info,
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+      }));
+
+    localStorage.setItem(lockKey, checked.join(', '));
+    $('#join-input-area').innerHTML = `<div class="badge badge-success">已投票：${checked.join(', ')}</div>`;
   } catch (e) {
     alert('投票失敗：' + e.message);
   }
