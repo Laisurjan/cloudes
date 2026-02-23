@@ -444,10 +444,15 @@ a { color: var(--primary); }
         </div>
         <div class="row admin-only">
           <button class="btn" onclick="showAddQuestionModal()">+ 新增題目</button>
+          <button class="btn" onclick="showImportModal()">📥 匯入題目</button>
+          <button class="btn" onclick="exportSetToXLSX()">📤 匯出報表</button>
           <button class="btn btn-danger" id="btn-delete-set">刪除題庫</button>
         </div>
       </div>
     </div>
+
+    <!-- 匯入檔案隱藏 input -->
+    <input type="file" id="import-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
 
     <div class="grid" id="questions-list"></div>
     <div id="no-questions" class="card text-center hidden">
@@ -1822,6 +1827,314 @@ async function submitRank(qid) {
     $('#join-input-area').innerHTML = `<div class="badge badge-success">已完成排序</div>`;
   } catch (e) {
     alert('送出失敗：' + e.message);
+  }
+}
+
+/* ========== 匯出 XLSX ========== */
+async function exportSetToXLSX() {
+  if (!currentSetId) { alert('請先選擇題庫'); return; }
+
+  try {
+    toast('正在匯出...');
+
+    const wb = XLSX.utils.book_new();
+    const setDoc = await db.collection('questionSets').doc(currentSetId).get();
+    const setData = setDoc.data();
+
+    // 題庫資訊工作表
+    const infoSheet = XLSX.utils.aoa_to_sheet([
+      ['題庫名稱', setData.name || ''],
+      ['描述', setData.description || ''],
+      ['房號', setData.roomId || ''],
+      ['題目數量', setData.questionCount || 0],
+      ['匯出時間', new Date().toLocaleString()]
+    ]);
+    XLSX.utils.book_append_sheet(wb, infoSheet, '題庫資訊');
+
+    // 取得所有題目
+    const questionsSnap = await db.collection('questionSets').doc(currentSetId)
+      .collection('questions').orderBy('order', 'asc').get();
+
+    // 題目清單工作表
+    const qListData = [['序號', '題目內容', '類型', '選項/項目', '多選', '需填資料']];
+    const typeNames = { qa: '問答', cloud: '文字雲', poll: '投票', scale: '評分量表', rank: '排序題' };
+
+    questionsSnap.docs.forEach((doc, idx) => {
+      const q = doc.data();
+      const req = q.requireInfo || {};
+      const reqStr = [req.class ? '班級' : '', req.seat ? '座號' : '', req.name ? '姓名' : ''].filter(Boolean).join(',');
+      const optStr = q.type === 'poll' ? (q.options || []).join(', ') : q.type === 'rank' ? (q.rankItems || []).join(', ') : '';
+
+      qListData.push([
+        idx + 1,
+        q.prompt || '',
+        typeNames[q.type] || q.type,
+        optStr,
+        q.multiSelect ? '是' : '否',
+        reqStr || '無'
+      ]);
+    });
+
+    const qListSheet = XLSX.utils.aoa_to_sheet(qListData);
+    XLSX.utils.book_append_sheet(wb, qListSheet, '題目清單');
+
+    // 每題的回覆工作表
+    for (let i = 0; i < questionsSnap.docs.length; i++) {
+      const doc = questionsSnap.docs[i];
+      const q = doc.data();
+
+      const responsesSnap = await doc.ref.collection('responses').orderBy('ts', 'asc').get();
+
+      let headers, rows;
+
+      if (q.type === 'qa' || q.type === 'cloud') {
+        headers = ['班級', '座號', '姓名', '內容', '讚數', '時間'];
+        rows = responsesSnap.docs.map(r => {
+          const d = r.data();
+          return [
+            d.class || '',
+            d.seat || '',
+            d.name || '',
+            d.text || '',
+            d.upvotes || 0,
+            d.ts ? d.ts.toDate().toLocaleString() : ''
+          ];
+        });
+      } else if (q.type === 'poll') {
+        headers = ['班級', '座號', '姓名', '選項', '時間'];
+        rows = responsesSnap.docs.map(r => {
+          const d = r.data();
+          const opt = d.option || (Array.isArray(d.options) ? d.options.join(', ') : '');
+          return [
+            d.class || '',
+            d.seat || '',
+            d.name || '',
+            opt,
+            d.ts ? d.ts.toDate().toLocaleString() : ''
+          ];
+        });
+      } else if (q.type === 'scale') {
+        headers = ['班級', '座號', '姓名', '分數', '時間'];
+        rows = responsesSnap.docs.map(r => {
+          const d = r.data();
+          return [
+            d.class || '',
+            d.seat || '',
+            d.name || '',
+            d.score || '',
+            d.ts ? d.ts.toDate().toLocaleString() : ''
+          ];
+        });
+      } else if (q.type === 'rank') {
+        headers = ['班級', '座號', '姓名', '排序結果', '時間'];
+        rows = responsesSnap.docs.map(r => {
+          const d = r.data();
+          return [
+            d.class || '',
+            d.seat || '',
+            d.name || '',
+            Array.isArray(d.ranking) ? d.ranking.join(' > ') : '',
+            d.ts ? d.ts.toDate().toLocaleString() : ''
+          ];
+        });
+      } else {
+        headers = ['資料'];
+        rows = [];
+      }
+
+      const sheetData = [headers, ...rows];
+      const sheetName = `Q${i + 1}_${(q.prompt || '').slice(0, 15)}`;
+      const respSheet = XLSX.utils.aoa_to_sheet(sheetData);
+      XLSX.utils.book_append_sheet(wb, respSheet, sheetName.replace(/[\\\/\?\*\[\]]/g, ''));
+    }
+
+    // 下載檔案
+    const fileName = `${setData.name || '題庫'}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    toast('匯出成功！');
+
+  } catch (e) {
+    alert('匯出失敗：' + e.message);
+    console.error(e);
+  }
+}
+
+/* ========== 匯入題目 ========== */
+function showImportModal() {
+  if (!isAdmin) { alert('請先登入管理員帳號'); return; }
+
+  const modal = $('#modal-overlay');
+  const content = $('#modal-content');
+
+  content.innerHTML = `
+    <h3 style="margin-top:0;">匯入題目</h3>
+    <div class="muted mb-2">
+      支援 CSV 或 XLSX 格式<br>
+      <a href="#" onclick="downloadImportTemplate(); return false;">📥 下載範本檔案</a>
+    </div>
+
+    <div class="card" style="padding:16px;background:var(--bg);text-align:center;cursor:pointer;border-style:dashed;"
+         onclick="document.getElementById('import-file-input').click()">
+      <div style="font-size:32px;margin-bottom:8px;">📁</div>
+      <div>點擊選擇檔案或拖曳至此</div>
+      <div class="muted mt-2" id="import-file-name">尚未選擇檔案</div>
+    </div>
+
+    <div id="import-preview" class="mt-4"></div>
+
+    <div class="row mt-4" style="justify-content:flex-end;">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="btn-confirm-import" onclick="confirmImport()" disabled>確認匯入</button>
+    </div>
+  `;
+
+  modal.classList.remove('hidden');
+}
+
+function downloadImportTemplate() {
+  const templateData = [
+    ['題目內容', '類型', '選項/項目', '多選', '需填班級', '需填座號', '需填姓名'],
+    ['今天的天氣如何？', '問答', '', '否', '否', '否', '否'],
+    ['你最喜歡的顏色？', '文字雲', '', '否', '否', '否', '是'],
+    ['你喜歡哪種水果？', '投票', '蘋果, 香蕉, 橘子', '是', '否', '否', '否'],
+    ['請評價今天的課程', '評分量表', '', '否', '是', '是', '是'],
+    ['依重要性排序以下項目', '排序題', '學習, 運動, 休息', '否', '否', '否', '否']
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(templateData);
+
+  // 設定欄寬
+  ws['!cols'] = [
+    { wch: 30 }, // 題目內容
+    { wch: 12 }, // 類型
+    { wch: 25 }, // 選項
+    { wch: 6 },  // 多選
+    { wch: 10 }, // 需填班級
+    { wch: 10 }, // 需填座號
+    { wch: 10 }  // 需填姓名
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, '題目範本');
+  XLSX.writeFile(wb, '題目匯入範本.xlsx');
+  toast('範本已下載');
+}
+
+let importData = null;
+
+function handleImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  $('#import-file-name').textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      if (json.length < 2) {
+        alert('檔案內容不足');
+        return;
+      }
+
+      // 解析資料
+      const headers = json[0];
+      const rows = json.slice(1).filter(row => row[0]); // 過濾空行
+
+      importData = rows.map(row => {
+        const typeMap = { '問答': 'qa', '文字雲': 'cloud', '投票': 'poll', '評分量表': 'scale', '排序題': 'rank' };
+        const yesNo = v => String(v).trim().toLowerCase() === '是' || String(v).trim() === '1' || String(v).trim().toLowerCase() === 'yes';
+
+        return {
+          prompt: String(row[0] || '').trim(),
+          type: typeMap[String(row[1] || '').trim()] || 'qa',
+          optionsStr: String(row[2] || '').trim(),
+          multiSelect: yesNo(row[3]),
+          requireInfo: {
+            class: yesNo(row[4]),
+            seat: yesNo(row[5]),
+            name: yesNo(row[6])
+          }
+        };
+      });
+
+      // 顯示預覽
+      const preview = $('#import-preview');
+      const typeNames = { qa: '問答', cloud: '文字雲', poll: '投票', scale: '評分量表', rank: '排序題' };
+
+      preview.innerHTML = `
+        <div class="muted mb-2">預覽（共 ${importData.length} 題）：</div>
+        <div style="max-height:200px;overflow:auto;">
+          ${importData.map((q, i) => `
+            <div class="row" style="padding:6px 0;border-bottom:1px solid var(--border);">
+              <span class="badge">${i + 1}</span>
+              <span class="badge">${typeNames[q.type]}</span>
+              <span style="flex:1;">${q.prompt.slice(0, 40)}${q.prompt.length > 40 ? '...' : ''}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+
+      $('#btn-confirm-import').disabled = false;
+
+    } catch (err) {
+      alert('檔案解析失敗：' + err.message);
+      console.error(err);
+    }
+  };
+
+  reader.readAsArrayBuffer(file);
+}
+
+async function confirmImport() {
+  if (!importData || importData.length === 0) {
+    alert('沒有可匯入的資料');
+    return;
+  }
+
+  try {
+    toast('正在匯入...');
+
+    const questionsRef = db.collection('questionSets').doc(currentSetId).collection('questions');
+    const existingSnap = await questionsRef.get();
+    let order = existingSnap.size;
+
+    for (const q of importData) {
+      const docData = withTTL({
+        prompt: q.prompt,
+        type: q.type,
+        options: q.type === 'poll' ? q.optionsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [],
+        rankItems: q.type === 'rank' ? q.optionsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [],
+        multiSelect: q.multiSelect,
+        requireInfo: q.requireInfo,
+        order: order++,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      await questionsRef.add(docData);
+    }
+
+    // 更新題目數量
+    await db.collection('questionSets').doc(currentSetId).update({
+      questionCount: firebase.firestore.FieldValue.increment(importData.length),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    closeModal();
+    toast(`成功匯入 ${importData.length} 題！`);
+    importData = null;
+
+    // 清空 file input
+    document.getElementById('import-file-input').value = '';
+
+  } catch (e) {
+    alert('匯入失敗：' + e.message);
+    console.error(e);
   }
 }
 
